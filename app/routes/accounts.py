@@ -51,11 +51,13 @@ def get_account(account_id):
     user_id = int(get_jwt_identity())
 
     account = Account.query.filter(
-        Account.id == account_id
+        Account.id == account_id,
+        Account.user_id == user_id,
+        Account.is_active == True
     ).first()
 
     if not account:
-        return jsonify({'status': 'success', 'message': 'Account retrieved'}), 200
+        return error_response('Account not found or does not belong to you', 404)
 
     return jsonify({
         'account_detail': account.to_dict(),
