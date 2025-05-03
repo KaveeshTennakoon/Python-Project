@@ -103,9 +103,9 @@ def login():
     # Verify user exists and password is correct
     if not user or not user.check_password(data["password"]):
         return error_response("Invalid credentials", 401)
-    
-    # Include role in JWT claims
-    additional_claims = {'role': user.role, 'password': data['password']}
+
+    # Include role in JWT claims (but not password for security)
+    additional_claims = {'role': user.role}
 
     # Create access token and refresh token
     access_token = create_access_token(identity=user.id, additional_claims=additional_claims)
