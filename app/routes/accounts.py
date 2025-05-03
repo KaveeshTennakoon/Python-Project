@@ -5,10 +5,8 @@ from app.models.account import Account
 from app.models.user import User
 from app.models.transaction import Transaction
 from app.utils.validators import error_response
-from app.utils.account_utils import generate_account_number
 from datetime import datetime
-from sqlalchemy import or_, text, and_
-import hashlib
+from sqlalchemy import or_
 
 bp = Blueprint('accounts', __name__, url_prefix='/api/accounts')
 
@@ -135,6 +133,7 @@ def update_account(account_id):
 
     account = Account.query.filter(
         Account.id == account_id,
+        Account.user_id == user_id,
         Account.is_active == True
     ).first()
 
@@ -167,6 +166,7 @@ def delete_account(account_id):
 
     account = Account.query.filter(
         Account.id == account_id,
+        Account.user_id == user_id,
         Account.is_active == True
     ).first()
 
@@ -187,6 +187,7 @@ def get_account_transactions(account_id):
 
     account = Account.query.filter(
         Account.id == account_id,
+        Account.user_id == user_id,
         Account.is_active == True
     ).first()
 
