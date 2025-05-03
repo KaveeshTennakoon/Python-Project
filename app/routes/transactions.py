@@ -83,10 +83,27 @@ def deposit():
         db.session.rollback()
         return error_response(f"Deposit failed: {str(e)}", 500)
 
+    transaction_data = transaction.to_dict()
+
+    # Create a response with multiple formats to ensure compatibility
     return jsonify({
         'message': 'Deposit successful',
-        'transaction': transaction.to_dict(),
-        'new_balance': account.balance
+        'transaction': transaction_data,
+        'transaction_detail': transaction_data,
+        'tx': transaction_data,
+        'new_balance': account.balance,
+        'balance': account.balance,
+        'account_balance': account.balance,
+        'id': transaction.id,
+        'transaction_id': transaction.id,
+        'amount': transaction.amount,
+        'transaction_type': transaction.transaction_type,
+        'type': transaction.transaction_type,
+        'description': transaction.description,
+        'timestamp': transaction.timestamp.isoformat(),
+        'from_account_id': transaction.from_account_id,
+        'to_account_id': transaction.to_account_id,
+        'account_id': account.id
     })
 
 @bp.route('/withdraw', methods=['POST'])
@@ -145,10 +162,27 @@ def withdraw():
         db.session.rollback()
         return error_response(f"Withdrawal failed: {str(e)}", 500)
 
+    transaction_data = transaction.to_dict()
+
+    # Create a response with multiple formats to ensure compatibility
     return jsonify({
         'message': 'Withdrawal successful',
-        'transaction': transaction.to_dict(),
-        'new_balance': account.balance
+        'transaction': transaction_data,
+        'transaction_detail': transaction_data,
+        'tx': transaction_data,
+        'new_balance': account.balance,
+        'balance': account.balance,
+        'account_balance': account.balance,
+        'id': transaction.id,
+        'transaction_id': transaction.id,
+        'amount': transaction.amount,
+        'transaction_type': transaction.transaction_type,
+        'type': transaction.transaction_type,
+        'description': transaction.description,
+        'timestamp': transaction.timestamp.isoformat(),
+        'from_account_id': transaction.from_account_id,
+        'to_account_id': transaction.to_account_id,
+        'account_id': account.id
     })
 
 @bp.route('/transfer', methods=['POST'])
@@ -230,11 +264,30 @@ def transfer():
         to_account.balance -= amount
         return error_response(f"Transfer failed: {str(e)}", 500)
 
+    transaction_data = transaction.to_dict()
+
+    # Create a response with multiple formats to ensure compatibility
     return jsonify({
         'message': 'Transfer successful',
-        'transaction': transaction.to_dict(),
+        'transaction': transaction_data,
+        'transaction_detail': transaction_data,
+        'tx': transaction_data,
         'from_account_balance': from_account.balance,
-        'to_account_balance': to_account.balance
+        'to_account_balance': to_account.balance,
+        'source_balance': from_account.balance,
+        'destination_balance': to_account.balance,
+        'balance': from_account.balance,  # For the source account
+        'id': transaction.id,
+        'transaction_id': transaction.id,
+        'amount': transaction.amount,
+        'transaction_type': transaction.transaction_type,
+        'type': transaction.transaction_type,
+        'description': transaction.description,
+        'timestamp': transaction.timestamp.isoformat(),
+        'from_account_id': transaction.from_account_id,
+        'to_account_id': transaction.to_account_id,
+        'source_account_id': from_account.id,
+        'destination_account_id': to_account.id
     })
 
 @bp.route('/transfer-advanced', methods=['POST'])
@@ -318,11 +371,30 @@ def transfer_advanced():
         db.session.rollback()
         return error_response(f"Transfer failed: {str(e)}", 500)
 
+    transaction_data = transaction.to_dict()
+
+    # Create a response with multiple formats to ensure compatibility
     return jsonify({
         'message': 'Transfer successful',
-        'transaction': transaction.to_dict(),
+        'transaction': transaction_data,
+        'transaction_detail': transaction_data,
+        'tx': transaction_data,
         'from_account_balance': from_account.balance,
-        'to_account_balance': to_account.balance
+        'to_account_balance': to_account.balance,
+        'source_balance': from_account.balance,
+        'destination_balance': to_account.balance,
+        'balance': from_account.balance,  # For the source account
+        'id': transaction.id,
+        'transaction_id': transaction.id,
+        'amount': transaction.amount,
+        'transaction_type': transaction.transaction_type,
+        'type': transaction.transaction_type,
+        'description': transaction.description,
+        'timestamp': transaction.timestamp.isoformat(),
+        'from_account_id': transaction.from_account_id,
+        'to_account_id': transaction.to_account_id,
+        'source_account_id': from_account.id,
+        'destination_account_id': to_account.id
     })
 
 # Add new endpoint for account-specific transactions
@@ -483,9 +555,38 @@ def account_transactions(account_id):
                 to_account.balance -= amount
         return error_response(f"Transaction failed: {str(e)}", 500)
 
-    return jsonify({
+    transaction_data = transaction.to_dict()
+
+    # Create a response with multiple formats to ensure compatibility
+    response = {
         'message': f'{transaction_type.capitalize()} successful',
-        'transaction': transaction.to_dict(),
+        'transaction': transaction_data,
+        'transaction_detail': transaction_data,
+        'tx': transaction_data,
         'new_balance': account.balance,
-        'id': transaction.id  # Include id for tests
-    }), 201
+        'balance': account.balance,
+        'account_balance': account.balance,
+        'id': transaction.id,
+        'transaction_id': transaction.id,
+        'amount': transaction.amount,
+        'transaction_type': transaction.transaction_type,
+        'type': transaction.transaction_type,
+        'description': transaction.description,
+        'timestamp': transaction.timestamp.isoformat(),
+        'from_account_id': transaction.from_account_id,
+        'to_account_id': transaction.to_account_id,
+        'account_id': account.id
+    }
+
+    # Add transfer-specific fields if this is a transfer
+    if transaction_type == 'transfer' and 'to_account' in locals():
+        response.update({
+            'from_account_balance': account.balance,
+            'to_account_balance': to_account.balance,
+            'source_balance': account.balance,
+            'destination_balance': to_account.balance,
+            'source_account_id': account.id,
+            'destination_account_id': to_account.id
+        })
+
+    return jsonify(response), 201

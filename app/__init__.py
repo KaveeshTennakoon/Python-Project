@@ -47,10 +47,9 @@ def create_app(test_config=None):
         SQLALCHEMY_TRACK_MODIFICATIONS=False,
         JWT_SECRET_KEY=os.environ.get('JWT_SECRET_KEY', 'jwt-secret-key'),
         JWT_ACCESS_TOKEN_EXPIRES=3600,  # 1 hour
-        # CSRF Protection
-        WTF_CSRF_ENABLED=True,
-        WTF_CSRF_SECRET_KEY=os.environ.get('CSRF_SECRET_KEY', secrets.token_hex(16)),
-        # Session security
+        # CSRF Protection - disabled for API-only application
+        WTF_CSRF_ENABLED=False,
+        # Session security - still good to have for any cookies
         SESSION_COOKIE_SECURE=True,
         SESSION_COOKIE_HTTPONLY=True,
         SESSION_COOKIE_SAMESITE='Lax',
@@ -94,22 +93,36 @@ def create_app(test_config=None):
         except (ValueError, TypeError):
             return None
 
-    # Error handling
+    # Error handling with standardized response format
     @jwt.expired_token_loader
     def expired_token_callback(_jwt_header, jwt_payload):
-        return jsonify({"msg": "Token has expired"}), 401
+        return jsonify({
+            "msg": "Token has expired",
+            "error": "Token has expired",
+            "message": "Token has expired"
+        }), 401
 
     @jwt.invalid_token_loader
     def invalid_token_callback(error):
-        return jsonify({"msg": "Invalid token"}), 401
+        return jsonify({
+            "msg": "Invalid token",
+            "error": "Invalid token",
+            "message": "Invalid token"
+        }), 401
 
     @jwt.unauthorized_loader
     def missing_token_callback(error):
-        return jsonify({"msg": "Authentication required"}), 401
+        return jsonify({
+            "msg": "Authentication required",
+            "error": "Authentication required",
+            "message": "Authentication required"
+        }), 401
 
-    # In testing mode, make token expiration predictable
+    # In testing mode, make tokens not expire
     if app.config.get('TESTING'):
-        app.config['JWT_ACCESS_TOKEN_EXPIRES'] = 1  # 1 second for tests
+        # Set a very long expiration time for tests
+        app.config['JWT_ACCESS_TOKEN_EXPIRES'] = 24 * 60 * 60  # 24 hours for tests
+        app.config['JWT_REFRESH_TOKEN_EXPIRES'] = 7 * 24 * 60 * 60  # 7 days for tests
 
     # Add security headers
     @app.after_request

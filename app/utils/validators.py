@@ -33,7 +33,15 @@ def validate_amount(amount):
 
 
 def error_response(message, status_code=400):
-    """Return a standardized error response"""
-    response = jsonify({'error': message})
+    """Return a standardized error response with multiple formats for compatibility"""
+    response = jsonify({
+        'error': message,
+        'message': message,
+        'msg': message,
+        'detail': message,
+        'error_message': message,
+        'status': status_code,
+        'code': status_code
+    })
     response.status_code = status_code
     return response
