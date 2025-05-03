@@ -54,9 +54,6 @@ def deposit():
     if not account:
         return error_response('Account not found or does not belong to you', 404)
 
-    # Update account balance
-    account.balance += amount
-
     # Validate description if provided
     description = data.get('description', 'Deposit')
     if description is not None:
@@ -76,11 +73,16 @@ def deposit():
         description=description
     )
 
+    # Update account balance and add transaction in a single transaction
     try:
+        # Update account balance
+        account.balance += amount
         db.session.add(transaction)
         db.session.commit()
     except Exception as e:
         db.session.rollback()
+        # Restore the original balance
+        account.balance -= amount
         return error_response(f"Deposit failed: {str(e)}", 500)
 
     transaction_data = transaction.to_dict()
@@ -207,31 +209,34 @@ def transfer():
         return error_response('Cannot transfer to the same account')
 
     # Get the from account and verify ownership and active status
-    from_account = Account.query.filter_by(
-        id=data['from_account_id'],
-        user_id=user_id,
-        is_active=True
-    ).first()
+    try:
+        from_account = Account.query.filter_by(
+            id=data['from_account_id'],
+            user_id=user_id,
+            is_active=True
+        ).first()
 
-    if not from_account:
-        return error_response('Source account not found, inactive, or does not belong to you', 404)
+        if not from_account:
+            return error_response('Source account not found, inactive, or does not belong to you', 404)
 
-    # Check sufficient balance
-    if from_account.balance < amount:
-        return error_response('Insufficient funds')
+        # Check sufficient balance
+        if from_account.balance < amount:
+            return error_response('Insufficient funds')
 
-    # Get the to account (doesn't have to belong to the user)
-    to_account = Account.query.filter_by(
-        id=data['to_account_id'],
-        is_active=True
-    ).first()
+        # Get the to account (doesn't have to belong to the user)
+        to_account = Account.query.filter_by(
+            id=data['to_account_id'],
+            is_active=True
+        ).first()
 
-    if not to_account:
-        return error_response('Destination account not found or inactive', 404)
+        if not to_account:
+            return error_response('Destination account not found or inactive', 404)
 
-    # Update account balances
-    from_account.balance -= amount
-    to_account.balance += amount
+        # Additional check to ensure accounts are different
+        if from_account.id == to_account.id:
+            return error_response('Cannot transfer to the same account', 400)
+    except Exception as e:
+        return error_response(f"Error validating accounts: {str(e)}", 500)
 
     # Validate description if provided
     default_desc = f'Transfer from {from_account.account_number} to {to_account.account_number}'
@@ -254,7 +259,12 @@ def transfer():
         description=description
     )
 
+    # Update balances and add transaction in a single transaction
     try:
+        # Update account balances
+        from_account.balance -= amount
+        to_account.balance += amount
+
         db.session.add(transaction)
         db.session.commit()
     except Exception as e:
@@ -318,57 +328,68 @@ def transfer_advanced():
     amount = float(data['amount'])
 
     # Get the accounts with active status check
-    from_account = Account.query.filter_by(
-        id=data['from_account_id'],
-        user_id=user_id,
-        is_active=True
-    ).first()
+    try:
+        from_account = Account.query.filter_by(
+            id=data['from_account_id'],
+            user_id=user_id,
+            is_active=True
+        ).first()
 
-    if not from_account:
-        return error_response('Source account not found, inactive, or does not belong to you', 404)
+        if not from_account:
+            return error_response('Source account not found, inactive, or does not belong to you', 404)
 
-    to_account = Account.query.filter_by(
-        id=data['to_account_id'],
-        is_active=True
-    ).first()
+        to_account = Account.query.filter_by(
+            id=data['to_account_id'],
+            is_active=True
+        ).first()
 
-    if not to_account:
-        return error_response('Destination account not found or inactive', 404)
+        if not to_account:
+            return error_response('Destination account not found or inactive', 404)
+
+        # Additional check to ensure accounts are different
+        if from_account.id == to_account.id:
+            return error_response('Cannot transfer to the same account', 400)
+    except Exception as e:
+        return error_response(f"Error validating accounts: {str(e)}", 500)
 
     # Check sufficient balance
     if from_account.balance < amount:
         return error_response('Insufficient funds')
 
-    # Update balances
-    from_account.balance -= amount
-    to_account.balance += amount
+    # Validate description if provided
+    default_desc = f'Transfer from {from_account.account_number} to {to_account.account_number}'
+    description = data.get('description', default_desc)
+    if description is not None:
+        if not isinstance(description, str):
+            return error_response('Description must be a string', 400)
+        if len(description) > 200:
+            return error_response('Description must be less than 200 characters', 400)
+        # Check for potentially dangerous characters
+        if any(c in description for c in ['<', '>', '"', "'", ';', '--']):
+            return error_response('Description contains invalid characters', 400)
 
+    # Create transaction record
+    transaction = Transaction(
+        transaction_type='transfer',
+        amount=amount,
+        from_account_id=from_account.id,
+        to_account_id=to_account.id,
+        description=description
+    )
+
+    # Update balances and add transaction in a single transaction
     try:
-        # Validate description if provided
-        default_desc = f'Transfer from {from_account.account_number} to {to_account.account_number}'
-        description = data.get('description', default_desc)
-        if description is not None:
-            if not isinstance(description, str):
-                return error_response('Description must be a string', 400)
-            if len(description) > 200:
-                return error_response('Description must be less than 200 characters', 400)
-            # Check for potentially dangerous characters
-            if any(c in description for c in ['<', '>', '"', "'", ';', '--']):
-                return error_response('Description contains invalid characters', 400)
-
-        # Create transaction record
-        transaction = Transaction(
-            transaction_type='transfer',
-            amount=amount,
-            from_account_id=from_account.id,
-            to_account_id=to_account.id,
-            description=description
-        )
+        # Update account balances
+        from_account.balance -= amount
+        to_account.balance += amount
 
         db.session.add(transaction)
         db.session.commit()
     except Exception as e:
         db.session.rollback()
+        # Restore original balances
+        from_account.balance += amount
+        to_account.balance -= amount
         return error_response(f"Transfer failed: {str(e)}", 500)
 
     transaction_data = transaction.to_dict()
@@ -405,9 +426,12 @@ def account_transactions(account_id):
     user_id = int(get_jwt_identity())
 
     # Verify account ownership
-    account = Account.query.filter_by(id=account_id, user_id=user_id).first()
-    if not account:
-        return error_response('Account not found or does not belong to you', 404)
+    try:
+        account = Account.query.filter_by(id=account_id, user_id=user_id, is_active=True).first()
+        if not account:
+            return error_response('Account not found, inactive, or does not belong to you', 404)
+    except Exception as e:
+        return error_response(f"Error validating account: {str(e)}", 500)
 
     if request.method == 'GET':
         # Get transactions for this account

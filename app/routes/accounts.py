@@ -55,14 +55,17 @@ def get_accounts():
 def get_account(account_id):
     user_id = int(get_jwt_identity())
 
-    account = Account.query.filter(
-        Account.id == account_id,
-        Account.user_id == user_id,
-        Account.is_active.is_(True)
-    ).first()
+    try:
+        account = Account.query.filter(
+            Account.id == account_id,
+            Account.user_id == user_id,
+            Account.is_active.is_(True)
+        ).first()
 
-    if not account:
-        return error_response('Account not found or does not belong to you', 404)
+        if not account:
+            return error_response('Account not found or does not belong to you', 404)
+    except Exception as e:
+        return error_response(f"Error retrieving account: {str(e)}", 500)
 
     account_data = account.to_dict()
 
@@ -160,8 +163,12 @@ def create_account():
         user_id=user_id
     )
 
-    db.session.add(new_account)
-    db.session.commit()
+    try:
+        db.session.add(new_account)
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        return error_response(f"Account creation failed: {str(e)}", 500)
 
     account_data = new_account.to_dict()
     # Use the actual balance from the account
@@ -192,14 +199,17 @@ def update_account(account_id):
     user_id = int(get_jwt_identity())
     data = request.get_json()
 
-    account = Account.query.filter(
-        Account.id == account_id,
-        Account.user_id == user_id,
-        Account.is_active.is_(True)
-    ).first()
+    try:
+        account = Account.query.filter(
+            Account.id == account_id,
+            Account.user_id == user_id,
+            Account.is_active.is_(True)
+        ).first()
 
-    if not account:
-        return error_response('Account not found or access denied', 404)
+        if not account:
+            return error_response('Account not found or access denied', 404)
+    except Exception as e:
+        return error_response(f"Error retrieving account: {str(e)}", 500)
 
     if 'account_label' in data:
         account_name = data.get('account_label')
@@ -220,7 +230,11 @@ def update_account(account_id):
         print(f"Warning: Potential SQL injection attempt detected: {description}")
         return error_response('Invalid characters in description', 400)
 
-    db.session.commit()
+    try:
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        return error_response(f"Account update failed: {str(e)}", 500)
 
     account_data = account.to_dict()
 
@@ -250,17 +264,25 @@ def update_account(account_id):
 def delete_account(account_id):
     user_id = int(get_jwt_identity())
 
-    account = Account.query.filter(
-        Account.id == account_id,
-        Account.user_id == user_id,
-        Account.is_active.is_(True)
-    ).first()
+    try:
+        account = Account.query.filter(
+            Account.id == account_id,
+            Account.user_id == user_id,
+            Account.is_active.is_(True)
+        ).first()
 
-    if not account:
-        return error_response('Account not found or access denied', 404)
+        if not account:
+            return error_response('Account not found or access denied', 404)
+    except Exception as e:
+        return error_response(f"Error retrieving account: {str(e)}", 500)
 
     account.is_active = False
-    db.session.commit()
+
+    try:
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        return error_response(f"Account deletion failed: {str(e)}", 500)
 
     return jsonify({
         'message': 'Account deletion processed'
@@ -271,14 +293,17 @@ def delete_account(account_id):
 def get_account_transactions(account_id):
     user_id = int(get_jwt_identity())
 
-    account = Account.query.filter(
-        Account.id == account_id,
-        Account.user_id == user_id,
-        Account.is_active.is_(True)
-    ).first()
+    try:
+        account = Account.query.filter(
+            Account.id == account_id,
+            Account.user_id == user_id,
+            Account.is_active.is_(True)
+        ).first()
 
-    if not account:
-        return error_response('Account not found', 404)
+        if not account:
+            return error_response('Account not found', 404)
+    except Exception as e:
+        return error_response(f"Error retrieving account: {str(e)}", 500)
 
     query = Transaction.query.filter(
         or_(
