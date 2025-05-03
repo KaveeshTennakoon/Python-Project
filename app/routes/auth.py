@@ -121,7 +121,7 @@ def login():
 
 # Get access token using refresh token
 @bp.route("/auth/refresh", methods=["POST"])
-@jwt_required()
+@jwt_required(refresh=True)
 def refresh():
     """Endpoint to refresh token using refresh token in request header"""
     try:
