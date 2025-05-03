@@ -1,18 +1,25 @@
 import re
 from flask import jsonify
 
+
 def validate_email(email):
     """Validate email format"""
-    pattern = r'^[\w\.-]+@[\w\.-]+\.\w+$'
-    if re.match(pattern, email) is None:
+    # More strict email validation pattern
+    pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+    if not isinstance(email, str) or re.match(pattern, email) is None:
+        return False
+    # Check for common invalid patterns
+    if '..' in email or email.startswith('.') or email.endswith('.'):
         return False
     return True
+
 
 def validate_password(password):
     """Password must be at least 8 characters"""
     if len(password) < 8:
         return False
     return True
+
 
 def validate_amount(amount):
     """Amount must be positive"""
@@ -24,8 +31,9 @@ def validate_amount(amount):
     except (ValueError, TypeError):
         return False
 
+
 def error_response(message, status_code=400):
     """Return a standardized error response"""
     response = jsonify({'error': message})
     response.status_code = status_code
-    return response 
+    return response

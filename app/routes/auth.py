@@ -6,19 +6,26 @@ from flask_jwt_extended import (
     get_jwt_identity,
     get_jwt,
 )
+import time
 from app import db, jwt
 from app.models.user import User
 from app.utils.validators import validate_email, error_response
 
 bp = Blueprint("auth", __name__, url_prefix="/api")
 
-# Blocklist for revoked tokens
-token_blocklist = set()
+# Blocklist for revoked tokens with expiration time
+token_blocklist = {}
 
 
 @jwt.token_in_blocklist_loader
 def check_if_token_revoked(_, jwt_payload):
     jti = jwt_payload["jti"]
+    # Clean up expired tokens
+    current_time = time.time()
+    for token_jti in list(token_blocklist.keys()):
+        if token_blocklist[token_jti] < current_time:
+            del token_blocklist[token_jti]
+
     return jti in token_blocklist
 
 
@@ -53,7 +60,8 @@ def register():
     password = data["password"]
     if not validate_password_complexity(password):
         return error_response(
-            "Password must be at least 8 characters long and include uppercase, lowercase, numbers, and special characters",
+            "Password must be at least 8 characters long and include uppercase, "
+            "lowercase, numbers, and special characters",
             400,
         )
 
@@ -145,8 +153,10 @@ def refresh():
 @jwt_required()
 def logout():
     """Endpoint to log out user by revoking their JWT token"""
-    jti = get_jwt()["jti"]
-    token_blocklist.add(jti)
+    jwt_data = get_jwt()
+    jti = jwt_data["jti"]
+    # Store token with expiration time (exp is in Unix timestamp format)
+    token_blocklist[jti] = jwt_data["exp"]
 
     return jsonify({"message": "Successfully logged out"})
 
@@ -227,6 +237,9 @@ def validate_password_complexity(password):
     if current_app.config.get("TESTING"):
         return len(password) >= 5  # Use simple validation in test mode
 
+    if not isinstance(password, str):
+        return False
+
     if len(password) < 8:
         return False
 
@@ -234,7 +247,17 @@ def validate_password_complexity(password):
     has_uppercase = any(c.isupper() for c in password)
     has_lowercase = any(c.islower() for c in password)
     has_digit = any(c.isdigit() for c in password)
-    has_special = any(not c.isalnum() for c in password)
+
+    # Define special characters explicitly
+    special_chars = "!@#$%^&*()-_=+[]{}|;:,.<>?/~`"
+    has_special = any(c in special_chars for c in password)
+
+    # Check for common weak patterns
+    common_patterns = ['password', '123456', 'qwerty', 'admin']
+    password_lower = password.lower()
+    for pattern in common_patterns:
+        if pattern in password_lower:
+            return False
 
     # Advanced version requires all criteria
     return has_uppercase and has_lowercase and has_digit and has_special

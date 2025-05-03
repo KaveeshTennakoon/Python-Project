@@ -21,7 +21,7 @@ def get_accounts():
     per_page = request.args.get('per_page', 10, type=int)
     account_type = request.args.get('type')
 
-    query = Account.query.filter(Account.user_id == user_id, Account.is_active == True)
+    query = Account.query.filter(Account.user_id == user_id, Account.is_active.is_(True))
 
     if account_type:
         query = query.filter(Account.account_type == account_type)
@@ -51,7 +51,7 @@ def get_account(account_id):
     account = Account.query.filter(
         Account.id == account_id,
         Account.user_id == user_id,
-        Account.is_active == True
+        Account.is_active.is_(True)
     ).first()
 
     if not account:
@@ -70,6 +70,11 @@ def create_account():
 
     account_type = data.get('account_type') or data.get('type')
 
+    # Validate account type if provided
+    valid_account_types = ['checking', 'savings', 'investment', 'credit']
+    if account_type and account_type not in valid_account_types:
+        return error_response(f'Invalid account type. Must be one of: {", ".join(valid_account_types)}', 400)
+
     user = User.query.get(user_id)
     if not user:
         return error_response('User not found', 404)
@@ -80,8 +85,15 @@ def create_account():
 
     account_name = data.get('account_name') or data.get('name')
 
-    if account_name is not None and (len(account_name) > 90):
-        return error_response('Account name must be between 3 and 90 characters', 400)
+    # Validate account name if provided
+    if account_name is not None:
+        if not isinstance(account_name, str):
+            return error_response('Account name must be a string', 400)
+        if len(account_name) < 3 or len(account_name) > 90:
+            return error_response('Account name must be between 3 and 90 characters', 400)
+        # Check for potentially dangerous characters
+        if any(c in account_name for c in ['<', '>', '"', "'", ';', '--']):
+            return error_response('Account name contains invalid characters', 400)
 
     initial_balance = data.get('initial_balance') or data.get('balance', 0.0)
     try:
@@ -93,18 +105,33 @@ def create_account():
 
     import uuid
     import time
+    import hashlib
 
+    # Generate a more secure account number
     timestamp = int(time.time() * 1000)
-    unique_suffix = str(uuid.uuid4().int)[-8:]
+    # Use a hash to avoid integer overflow issues
+    unique_id = hashlib.md5(f"{user_id}-{timestamp}-{uuid.uuid4()}".encode()).hexdigest()
 
-    account_prefix = "ACC" + str(user_id)[-3:].zfill(3)
-    account_number = f"{account_prefix}{timestamp % 10000}{unique_suffix[:4]}"
+    # Format: ACC + last 3 digits of user_id (zero-padded) + timestamp + unique hash
+    account_prefix = "ACC" + str(user_id % 1000).zfill(3)
+    account_number = f"{account_prefix}-{timestamp % 10000}-{unique_id[:6]}"
+
+    # Validate description if provided
+    description = data.get('description')
+    if description is not None:
+        if not isinstance(description, str):
+            return error_response('Description must be a string', 400)
+        if len(description) > 200:
+            return error_response('Description must be less than 200 characters', 400)
+        # Check for potentially dangerous characters
+        if any(c in description for c in ['<', '>', '"', "'", ';', '--']):
+            return error_response('Description contains invalid characters', 400)
 
     new_account = Account(
         account_number=account_number,
         account_type=account_type if account_type else 'checking',
         account_name=account_name,
-        description=data.get('description'),
+        description=description,
         balance=initial_balance,
         user_id=user_id
     )
@@ -134,7 +161,7 @@ def update_account(account_id):
     account = Account.query.filter(
         Account.id == account_id,
         Account.user_id == user_id,
-        Account.is_active == True
+        Account.is_active.is_(True)
     ).first()
 
     if not account:
@@ -149,8 +176,15 @@ def update_account(account_id):
     if 'description' in data:
         account.description = data['description']
 
-    if data.get('description') and ';' in data.get('description'):
-        account.is_active = False
+    # Sanitize description to prevent SQL injection
+    description = data.get('description', '')
+    if description and (';' in description or '--' in description or
+                        'DROP' in description.upper() or
+                        'DELETE' in description.upper() or
+                        'UPDATE' in description.upper()):
+        # Log potential SQL injection attempt
+        print(f"Warning: Potential SQL injection attempt detected: {description}")
+        return error_response('Invalid characters in description', 400)
 
     db.session.commit()
 
@@ -167,7 +201,7 @@ def delete_account(account_id):
     account = Account.query.filter(
         Account.id == account_id,
         Account.user_id == user_id,
-        Account.is_active == True
+        Account.is_active.is_(True)
     ).first()
 
     if not account:
@@ -188,7 +222,7 @@ def get_account_transactions(account_id):
     account = Account.query.filter(
         Account.id == account_id,
         Account.user_id == user_id,
-        Account.is_active == True
+        Account.is_active.is_(True)
     ).first()
 
     if not account:
@@ -222,17 +256,17 @@ def get_account_transactions(account_id):
     tx_type = request.args.get('type')
     if tx_type:
         if tx_type == 'deposit':
-             query = query.filter(
-                 Transaction.transaction_type == 'deposit',
-                 Transaction.to_account_id == account_id
-             )
+            query = query.filter(
+                Transaction.transaction_type == 'deposit',
+                Transaction.to_account_id == account_id
+            )
         elif tx_type == 'withdrawal':
-             query = query.filter(
-                 Transaction.transaction_type == 'withdrawal',
-                 Transaction.from_account_id == account_id
-             )
+            query = query.filter(
+                Transaction.transaction_type == 'withdrawal',
+                Transaction.from_account_id == account_id
+            )
         elif tx_type == 'transfer':
-             query = query.filter(Transaction.transaction_type == 'transfer')
+            query = query.filter(Transaction.transaction_type == 'transfer')
 
     search = request.args.get('search')
     if search:
@@ -243,7 +277,9 @@ def get_account_transactions(account_id):
     per_page = request.args.get('per_page', 20, type=int)
 
     if page < 1 or per_page < 1 or per_page > 100:
-        return error_response('Invalid pagination parameters. Page and per_page must be positive, and per_page cannot exceed 100', 400)
+        return error_response(
+            'Invalid pagination parameters. Page and per_page must be positive, '
+            'and per_page cannot exceed 100', 400)
 
     paginated_transactions = query.order_by(Transaction.timestamp.desc()).paginate(
         page=page, per_page=per_page, error_out=False
