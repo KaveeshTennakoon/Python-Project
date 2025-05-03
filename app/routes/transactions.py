@@ -3,7 +3,7 @@ from flask_jwt_extended import jwt_required, get_jwt_identity
 from app import db
 from app.models.account import Account
 from app.models.transaction import Transaction
-from app.utils.validators import validate_amount, error_response
+from app.utils.validators import validate_amount, validate_description, error_response
 
 bp = Blueprint('transactions', __name__, url_prefix='/api/transactions')
 
@@ -48,32 +48,27 @@ def deposit():
 
     amount = float(data['amount'])
 
-    # Get the account
-    account = Account.query.filter_by(id=data['account_id'], user_id=user_id).first()
+    # Get the account and check if it's active
+    account = Account.query.filter_by(id=data['account_id'], user_id=user_id, is_active=True).first()
 
     if not account:
-        return error_response('Account not found or does not belong to you', 404)
+        return error_response('Account not found, inactive, or does not belong to you', 404)
 
-    # Update account balance
-    account.balance += amount
+    # Update account balance with proper rounding
+    account.balance = round(account.balance + amount, 2)
 
-    # Validate description if provided
+    # Validate description using our new function
     description = data.get('description', 'Deposit')
-    if description is not None:
-        if not isinstance(description, str):
-            return error_response('Description must be a string', 400)
-        if len(description) > 200:
-            return error_response('Description must be less than 200 characters', 400)
-        # Check for potentially dangerous characters
-        if any(c in description for c in ['<', '>', '"', "'", ';', '--']):
-            return error_response('Description contains invalid characters', 400)
+    validated_description, desc_error = validate_description(description)
+    if desc_error:
+        return error_response(desc_error, 400)
 
     # Create transaction record
     transaction = Transaction(
         transaction_type='deposit',
-        amount=amount,
+        amount=round(amount, 2),
         to_account_id=account.id,
-        description=description
+        description=validated_description
     )
 
     try:
@@ -81,6 +76,8 @@ def deposit():
         db.session.commit()
     except Exception as e:
         db.session.rollback()
+        # Restore original balance
+        account.balance = round(account.balance - amount, 2)
         return error_response(f"Deposit failed: {str(e)}", 500)
 
     transaction_data = transaction.to_dict()
@@ -123,36 +120,31 @@ def withdraw():
 
     amount = float(data['amount'])
 
-    # Get the account
-    account = Account.query.filter_by(id=data['account_id'], user_id=user_id).first()
+    # Get the account and check if it's active
+    account = Account.query.filter_by(id=data['account_id'], user_id=user_id, is_active=True).first()
 
     if not account:
-        return error_response('Account not found or does not belong to you', 404)
+        return error_response('Account not found, inactive, or does not belong to you', 404)
 
     # Check sufficient balance
     if account.balance < amount:
         return error_response('Insufficient funds')
 
-    # Update account balance
-    account.balance -= amount
+    # Update account balance with proper rounding
+    account.balance = round(account.balance - amount, 2)
 
-    # Validate description if provided
+    # Validate description using our new function
     description = data.get('description', 'Withdrawal')
-    if description is not None:
-        if not isinstance(description, str):
-            return error_response('Description must be a string', 400)
-        if len(description) > 200:
-            return error_response('Description must be less than 200 characters', 400)
-        # Check for potentially dangerous characters
-        if any(c in description for c in ['<', '>', '"', "'", ';', '--']):
-            return error_response('Description contains invalid characters', 400)
+    validated_description, desc_error = validate_description(description)
+    if desc_error:
+        return error_response(desc_error, 400)
 
     # Create transaction record
     transaction = Transaction(
         transaction_type='withdrawal',
-        amount=amount,
+        amount=round(amount, 2),
         from_account_id=account.id,
-        description=description
+        description=validated_description
     )
 
     try:
@@ -160,6 +152,8 @@ def withdraw():
         db.session.commit()
     except Exception as e:
         db.session.rollback()
+        # Restore original balance
+        account.balance = round(account.balance + amount, 2)
         return error_response(f"Withdrawal failed: {str(e)}", 500)
 
     transaction_data = transaction.to_dict()
@@ -201,6 +195,8 @@ def transfer():
         return error_response('Amount must be a positive number')
 
     amount = float(data['amount'])
+    # Use proper rounding for money values
+    amount = round(amount, 2)
 
     # Check if accounts are different
     if data['from_account_id'] == data['to_account_id']:
@@ -229,21 +225,16 @@ def transfer():
     if not to_account:
         return error_response('Destination account not found or inactive', 404)
 
-    # Update account balances
-    from_account.balance -= amount
-    to_account.balance += amount
+    # Update account balances with proper rounding
+    from_account.balance = round(from_account.balance - amount, 2)
+    to_account.balance = round(to_account.balance + amount, 2)
 
-    # Validate description if provided
+    # Validate description using our new function
     default_desc = f'Transfer from {from_account.account_number} to {to_account.account_number}'
     description = data.get('description', default_desc)
-    if description is not None:
-        if not isinstance(description, str):
-            return error_response('Description must be a string', 400)
-        if len(description) > 200:
-            return error_response('Description must be less than 200 characters', 400)
-        # Check for potentially dangerous characters
-        if any(c in description for c in ['<', '>', '"', "'", ';', '--']):
-            return error_response('Description contains invalid characters', 400)
+    validated_description, desc_error = validate_description(description)
+    if desc_error:
+        return error_response(desc_error, 400)
 
     # Create transaction record
     transaction = Transaction(
@@ -251,7 +242,7 @@ def transfer():
         amount=amount,
         from_account_id=from_account.id,
         to_account_id=to_account.id,
-        description=description
+        description=validated_description
     )
 
     try:
@@ -260,8 +251,13 @@ def transfer():
     except Exception as e:
         db.session.rollback()
         # Restore original balances
-        from_account.balance += amount
-        to_account.balance -= amount
+        from_account.balance = round(from_account.balance + amount, 2)
+        to_account.balance = round(to_account.balance - amount, 2)
+        
+        # Log the error for debugging
+        import logging
+        logging.error(f"Transfer failed: {str(e)}")
+        
         return error_response(f"Transfer failed: {str(e)}", 500)
 
     transaction_data = transaction.to_dict()
@@ -316,10 +312,12 @@ def transfer_advanced():
         return error_response('Amount must be a positive number')
 
     amount = float(data['amount'])
+    # Use proper rounding for money values
+    amount = round(amount, 2)
 
     # Get the accounts with active status check
     from_account = Account.query.filter_by(
-        id=data['from_account_id'],
+        id=from_account_id,
         user_id=user_id,
         is_active=True
     ).first()
@@ -328,7 +326,7 @@ def transfer_advanced():
         return error_response('Source account not found, inactive, or does not belong to you', 404)
 
     to_account = Account.query.filter_by(
-        id=data['to_account_id'],
+        id=to_account_id,
         is_active=True
     ).first()
 
@@ -339,36 +337,34 @@ def transfer_advanced():
     if from_account.balance < amount:
         return error_response('Insufficient funds')
 
-    # Update balances
-    from_account.balance -= amount
-    to_account.balance += amount
+    # Update balances with proper rounding
+    from_account.balance = round(from_account.balance - amount, 2)
+    to_account.balance = round(to_account.balance + amount, 2)
+
+    # Validate description using our new function
+    default_desc = f'Advanced transfer from {from_account.account_number} to {to_account.account_number}'
+    description = data.get('description', default_desc)
+    validated_description, desc_error = validate_description(description)
+    if desc_error:
+        return error_response(desc_error, 400)
+
+    # Create transaction record
+    transaction = Transaction(
+        transaction_type='transfer',
+        amount=amount,
+        from_account_id=from_account.id,
+        to_account_id=to_account.id,
+        description=validated_description
+    )
 
     try:
-        # Validate description if provided
-        default_desc = f'Transfer from {from_account.account_number} to {to_account.account_number}'
-        description = data.get('description', default_desc)
-        if description is not None:
-            if not isinstance(description, str):
-                return error_response('Description must be a string', 400)
-            if len(description) > 200:
-                return error_response('Description must be less than 200 characters', 400)
-            # Check for potentially dangerous characters
-            if any(c in description for c in ['<', '>', '"', "'", ';', '--']):
-                return error_response('Description contains invalid characters', 400)
-
-        # Create transaction record
-        transaction = Transaction(
-            transaction_type='transfer',
-            amount=amount,
-            from_account_id=from_account.id,
-            to_account_id=to_account.id,
-            description=description
-        )
-
         db.session.add(transaction)
         db.session.commit()
     except Exception as e:
         db.session.rollback()
+        # Restore original balances
+        from_account.balance = round(from_account.balance + amount, 2)
+        to_account.balance = round(to_account.balance - amount, 2)
         return error_response(f"Transfer failed: {str(e)}", 500)
 
     transaction_data = transaction.to_dict()
@@ -404,10 +400,10 @@ def account_transactions(account_id):
     """Handle transactions for a specific account"""
     user_id = int(get_jwt_identity())
 
-    # Verify account ownership
-    account = Account.query.filter_by(id=account_id, user_id=user_id).first()
+    # Verify account ownership and active status
+    account = Account.query.filter_by(id=account_id, user_id=user_id, is_active=True).first()
     if not account:
-        return error_response('Account not found or does not belong to you', 404)
+        return error_response('Account not found, inactive, or does not belong to you', 404)
 
     if request.method == 'GET':
         # Get transactions for this account
@@ -428,37 +424,31 @@ def account_transactions(account_id):
         return error_response('Transaction type and amount are required')
 
     # Validate amount - must be positive
-    try:
-        amount = float(data['amount'])
-        if amount <= 0:
-            return error_response('Amount must be a positive number', 400)
-    except (ValueError, TypeError):
-        return error_response('Amount must be a valid number', 400)
+    if not validate_amount(data['amount']):
+        return error_response('Amount must be a positive number', 400)
+
+    # Use proper rounding for money values
+    amount = round(float(data['amount']), 2)
 
     # Process based on transaction type
     transaction_type = data['type'].lower()
 
     if transaction_type == 'deposit':
-        # Update account balance
-        account.balance += amount
+        # Update account balance with proper rounding
+        account.balance = round(account.balance + amount, 2)
 
-        # Validate description if provided
+        # Validate description using our new function
         description = data.get('description', 'Deposit')
-        if description is not None:
-            if not isinstance(description, str):
-                return error_response('Description must be a string', 400)
-            if len(description) > 200:
-                return error_response('Description must be less than 200 characters', 400)
-            # Check for potentially dangerous characters
-            if any(c in description for c in ['<', '>', '"', "'", ';', '--']):
-                return error_response('Description contains invalid characters', 400)
+        validated_description, desc_error = validate_description(description)
+        if desc_error:
+            return error_response(desc_error, 400)
 
         # Create transaction record
         transaction = Transaction(
             transaction_type='deposit',
             amount=amount,
             to_account_id=account_id,
-            description=description
+            description=validated_description
         )
 
     elif transaction_type == 'withdrawal':
@@ -466,26 +456,21 @@ def account_transactions(account_id):
         if account.balance < amount:
             return error_response('Insufficient funds', 400)
 
-        # Update account balance
-        account.balance -= amount
+        # Update account balance with proper rounding
+        account.balance = round(account.balance - amount, 2)
 
-        # Validate description if provided
+        # Validate description using our new function
         description = data.get('description', 'Withdrawal')
-        if description is not None:
-            if not isinstance(description, str):
-                return error_response('Description must be a string', 400)
-            if len(description) > 200:
-                return error_response('Description must be less than 200 characters', 400)
-            # Check for potentially dangerous characters
-            if any(c in description for c in ['<', '>', '"', "'", ';', '--']):
-                return error_response('Description contains invalid characters', 400)
+        validated_description, desc_error = validate_description(description)
+        if desc_error:
+            return error_response(desc_error, 400)
 
         # Create transaction record
         transaction = Transaction(
             transaction_type='withdrawal',
             amount=amount,
             from_account_id=account_id,
-            description=description
+            description=validated_description
         )
 
     elif transaction_type == 'transfer':
@@ -498,39 +483,30 @@ def account_transactions(account_id):
             return error_response('Insufficient funds', 400)
 
         # Get destination account
-        to_account_id = data['to_account_id']
-
-        # Validate to_account_id is an integer
         try:
-            to_account_id = int(to_account_id)
+            to_account_id = int(data['to_account_id'])
         except (ValueError, TypeError):
             return error_response('Destination account ID must be a valid integer', 400)
-
-        # Check that destination account exists and is active
-        to_account = Account.query.filter_by(id=to_account_id, is_active=True).first()
-
-        if not to_account:
-            return error_response('Destination account not found or inactive', 404)
 
         # Prevent transfer to the same account
         if to_account_id == account_id:
             return error_response('Cannot transfer to the same account', 400)
 
-        # Update account balances
-        account.balance -= amount
-        to_account.balance += amount
+        # Check that destination account exists and is active
+        to_account = Account.query.filter_by(id=to_account_id, is_active=True).first()
+        if not to_account:
+            return error_response('Destination account not found or inactive', 404)
 
-        # Validate description if provided
+        # Update account balances with proper rounding
+        account.balance = round(account.balance - amount, 2)
+        to_account.balance = round(to_account.balance + amount, 2)
+
+        # Validate description using our new function
         default_desc = f'Transfer to {to_account.account_number}'
         description = data.get('description', default_desc)
-        if description is not None:
-            if not isinstance(description, str):
-                return error_response('Description must be a string', 400)
-            if len(description) > 200:
-                return error_response('Description must be less than 200 characters', 400)
-            # Check for potentially dangerous characters
-            if any(c in description for c in ['<', '>', '"', "'", ';', '--']):
-                return error_response('Description contains invalid characters', 400)
+        validated_description, desc_error = validate_description(description)
+        if desc_error:
+            return error_response(desc_error, 400)
 
         # Create transaction record
         transaction = Transaction(
@@ -538,7 +514,7 @@ def account_transactions(account_id):
             amount=amount,
             from_account_id=account_id,
             to_account_id=to_account_id,
-            description=description
+            description=validated_description
         )
     else:
         return error_response('Invalid transaction type. Must be deposit, withdrawal, or transfer', 400)
@@ -548,11 +524,19 @@ def account_transactions(account_id):
         db.session.commit()
     except Exception as e:
         db.session.rollback()
-        # If this was a withdrawal or transfer, restore the balance
-        if transaction_type in ['withdrawal', 'transfer']:
-            account.balance += amount
-            if transaction_type == 'transfer' and 'to_account_id' in locals():
-                to_account.balance -= amount
+        # Restore original balances
+        if transaction_type == 'deposit':
+            account.balance = round(account.balance - amount, 2)
+        elif transaction_type == 'withdrawal':
+            account.balance = round(account.balance + amount, 2)
+        elif transaction_type == 'transfer' and 'to_account' in locals():
+            account.balance = round(account.balance + amount, 2)
+            to_account.balance = round(to_account.balance - amount, 2)
+        
+        # Log the error for debugging
+        import logging
+        logging.error(f"Transaction failed: {str(e)}")
+        
         return error_response(f"Transaction failed: {str(e)}", 500)
 
     transaction_data = transaction.to_dict()
@@ -589,4 +573,4 @@ def account_transactions(account_id):
             'destination_account_id': to_account.id
         })
 
-    return jsonify(response), 201
+    return jsonify(response), 200

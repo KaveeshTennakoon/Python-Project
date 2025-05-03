@@ -32,6 +32,24 @@ def validate_amount(amount):
         return False
 
 
+def validate_description(description, default="Transaction"):
+    """Validate transaction description"""
+    if description is None:
+        return default, None
+    
+    if not isinstance(description, str):
+        return None, 'Description must be a string'
+    
+    if len(description) > 200:
+        return None, 'Description must be less than 200 characters'
+    
+    # Use a whitelist approach for characters - allow alphanumeric and common punctuation
+    if not re.match(r'^[a-zA-Z0-9\s.,!?()-_]*$', description):
+        return None, 'Description contains invalid characters'
+    
+    return description, None
+
+
 def error_response(message, status_code=400):
     """Return a standardized error response with multiple formats for compatibility"""
     response = jsonify({
